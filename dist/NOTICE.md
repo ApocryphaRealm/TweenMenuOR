@@ -1,4 +1,4 @@
-# Tween Menu for Oblivion - copyright and licence
+# Tween Menu (Oblivion Remastered) - copyright and licence
 
 Copyright (C) 2026 ApocryphaRealm
 

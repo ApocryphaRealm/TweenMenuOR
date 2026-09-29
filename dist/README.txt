@@ -1,4 +1,4 @@
-Tween Menu for Oblivion
+Tween Menu (Oblivion Remastered)
 =======================
 Version 1.0.0
 

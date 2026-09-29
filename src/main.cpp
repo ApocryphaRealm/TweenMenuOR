@@ -1,4 +1,4 @@
-// Tween Menu for Oblivion Remastered - plan: 4. plans\tween-menu-oblivion\PLAN.md.
+// Tween Menu (Oblivion Remastered) - plan: 4. plans\tween-menu-oblivion\PLAN.md.
 #include "Input.h"
 #include "Menu.h"
 #include "Settings.h"

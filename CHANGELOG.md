@@ -8,7 +8,7 @@ Written as changes happen, not reconstructed afterwards (rule 61). Each version 
 * **failed** - built but crashed or malfunctioned; the number was reclaimed
 * **scratch** - a hypothesis-test build that never held a real number
 
-## 1.0.0 - 2026-09-29 - untested
+## 1.0.0 - 2026-09-29 - working
 
 ### Added
 - the tween menu - a hub opened on one button, built from the game's own Controls-page boxes in four directions with no background: Character and Quests up, Inventory right, Map and Wait down, Magic left. Each option opens the game's own menu through its own input action.

@@ -1,7 +1,7 @@
 -- Tween Menu for The Elder Scrolls IV: Oblivion Remastered (OBSE64 plugin).
 -- A tween-style hub menu built at runtime from the game's own widgets and art, modelled on Skyrim's Tween Menu
--- Overhaul (modular options, Classic / Alternative layouts), with its own row in the game's Controls page and Select
--- as its default controller button (the owner, 2026-09-29; plan: 4. plans/tween-menu-oblivion/PLAN.md).
+-- Overhaul. It opens on Wait's key binding (Select and T by default - Wait becomes one of its options), and Start
+-- opens System on Save & Load (the owner, 2026-09-29; plan: 4. plans/tween-menu-oblivion/PLAN.md).
 -- rule 45: no build-machine paths in any compiled object - set BEFORE includes() so CommonLibOB64's own library
 -- target gets it too (a std::source_location in an OBSE header reached through the PCH's absolute -FI path).
 -- /d1trimfile strips the project folder from __FILE__ and std::source_location. The flag is wrapped in a TABLE so
@@ -14,7 +14,7 @@ add_shflags("/PDBALTPATH:%_PDB%", {force = true})
 includes("lib/commonlibob64")
 
 set_project("TweenMenu")
-set_version("0.0.0")
+set_version("1.0.0")
 set_license("GPL-3.0-or-later")
 set_languages("c++23")
 set_warnings("allextra")

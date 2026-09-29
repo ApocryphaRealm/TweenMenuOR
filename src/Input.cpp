@@ -250,8 +250,14 @@ namespace input
 			auto* cls = UE::StaticFindObject<UE::UClass>(nullptr, nullptr, L"/Script/EnhancedInput.EnhancedInputLocalPlayerSubsystem");
 			int n = 0;
 			for (auto* sub : reflect::Instances(cls)) {
+				// Both parameters set: zeroed, RebuildType is EInputMappingRebuildType::None (0) and the request does nothing -
+				// until 2026-09-29 every rebuild here was a no-op, and the first Select after loading a save still opened
+				// Wait beside the tween menu (the player's compiled mappings were only rebuilt when a game menu next
+				// pushed a context). Options = FModifyContextOptions' default: bIgnoreAllPressedKeysUntilRelease (bit 0).
 				Call c(sub, L"RequestRebuildControlMappings");
 				if (c) {
+					c.Set("Options", std::uint8_t{ 1 });
+					c.Set("RebuildType", std::uint8_t{ 1 });   // EInputMappingRebuildType::Rebuild
 					c.Run();
 					++n;
 				}

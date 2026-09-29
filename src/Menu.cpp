@@ -18,32 +18,22 @@ namespace menu
 
 		enum Dir { kUp, kRight, kDown, kLeft, kDirs };
 
-		struct Option
-		{
-			const char*    label;
-			const wchar_t* action;   // the game's own input action for it
-		};
-
-		// M2's fixed set (M3: one JSON per option, as Tween Menu Overhaul) - every one opens through its own action
-		const std::array<std::vector<Option>, kDirs> kOptions{ {
-			{ { "Character", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenStatsMenu.IA_Game_Default_OpenStatsMenu" },
-				{ "Quests", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenQuestMenu.IA_Game_Default_OpenQuestMenu" } },
-			{ { "Inventory", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenInventoryMenu.IA_Game_Default_OpenInventoryMenu" },
-				{ "Magic", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenMagicMenu.IA_Game_Default_OpenMagicMenu" } },
-			{ { "Map", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenMapMenu.IA_Game_Default_OpenMapMenu" },
-				{ "Wait", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenRestMenu.IA_Game_Default_OpenRestMenu" } },
-			{ { "System", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenOptionsMenu.IA_Game_Default_OpenOptionsMenu" },
-				{ "Help", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenHelpMenu.IA_Game_Default_OpenHelpMenu" } },
-		} };
-
+		// One box per function (all of them, built once); each open places them from the Controls page's "Tween Menu
+		// Layout" rows (M6, the owner 2026-09-29: the D-pad direction bound to a function's row is its side).
 		struct Entry
 		{
-			UE::UObject* box = nullptr;
-			UE::UObject* label = nullptr;
+			std::string    id;
+			std::wstring   text;
+			const wchar_t* action = nullptr;   // the game's own input action that opens it
+			UE::UObject*   box = nullptr;
+			UE::UObject*   label = nullptr;
+			UE::UObject*   boxSlot = nullptr;
+			UE::UObject*   labelSlot = nullptr;
 		};
 
 		UE::UObject* g_root = nullptr;   // the UserWidget on the viewport
-		std::array<std::vector<Entry>, kDirs> g_entries;
+		std::vector<Entry> g_all;                          // every function's box
+		std::array<std::vector<Entry*>, kDirs> g_entries;  // this open's layout: the boxes on each side, in order
 		bool  g_open = false;
 		int   g_cat = -1, g_idx = 0;
 		WORD  g_prevButtons = 0;
@@ -133,7 +123,7 @@ namespace menu
 		{
 			for (int d = 0; d < kDirs; ++d) {
 				for (int i = 0; i < static_cast<int>(g_entries[d].size()); ++i) {
-					SetBoxLit(g_entries[d][i], d == g_cat && i == g_idx);
+					SetBoxLit(*g_entries[d][i], d == g_cat && i == g_idx);
 				}
 			}
 		}
@@ -238,31 +228,29 @@ namespace menu
 			*rootWidget = canvas;
 
 			int made = 0;
-			for (int d = 0; d < kDirs; ++d) {
-				const int n = static_cast<int>(kOptions[d].size());
-				for (int i = 0; i < n; ++i) {
-					Entry e;
-					e.box = Create(kTileClass);
-					e.label = Create(kTextClass);
-					if (!e.box || !e.label) {
-						continue;
-					}
-					// the label: the Controls row label's own style, then our text
-					CopyProperty(e.label, labelTemplate, "FontInfo");
-					CopyProperty(e.label, labelTemplate, "Justification");
-					CopyProperty(e.label, labelTemplate, "FontSizeChannel");
-					if (const auto t = reflect::Offset(e.label->GetClass(), "Text"); t >= 0) {
-						auto* text = reflect::At<UE::FText>(e.label, t);
-						const std::wstring label(kOptions[d][i].label, kOptions[d][i].label + std::strlen(kOptions[d][i].label));
-						text->~FText();   // FText cannot be assigned: the default text goes, ours is made in its place
-						new (text) UE::FText(UE::FText::AsCultureInvariant(UE::FString(label.c_str())));
-					}
-					const auto [x, y] = Place(d, i, n);
-					AddToCanvas(canvas, e.box, x, y, kBoxW, kBoxH, false);
-					AddToCanvas(canvas, e.label, x, y, 0, 0, true);
-					g_entries[d].push_back(e);
-					++made;
+			for (const auto& f : input::Layout()) {
+				Entry e;
+				e.id = f.id;
+				e.text = f.label;
+				e.action = f.action;
+				e.box = Create(kTileClass);
+				e.label = Create(kTextClass);
+				if (!e.box || !e.label) {
+					continue;
 				}
+				// the label: the Controls row label's own style, then the function's name
+				CopyProperty(e.label, labelTemplate, "FontInfo");
+				CopyProperty(e.label, labelTemplate, "Justification");
+				CopyProperty(e.label, labelTemplate, "FontSizeChannel");
+				if (const auto t = reflect::Offset(e.label->GetClass(), "Text"); t >= 0) {
+					auto* text = reflect::At<UE::FText>(e.label, t);
+					text->~FText();   // FText cannot be assigned: the default text goes, ours is made in its place
+					new (text) UE::FText(UE::FText::AsCultureInvariant(UE::FString(e.text.c_str())));
+				}
+				e.boxSlot = AddToCanvas(canvas, e.box, 0, 0, kBoxW, kBoxH, false);
+				e.labelSlot = AddToCanvas(canvas, e.label, 0, 0, 0, 0, true);
+				g_all.push_back(e);
+				++made;
 			}
 			logger::info("menu: built from the game's widgets - {} option boxes on a canvas, no background", made);
 			return made > 0;
@@ -276,14 +264,53 @@ namespace menu
 			if (!g_root || !reflect::IsLive(g_root)) {
 				return false;
 			}
-			for (const auto& dir : g_entries) {
-				for (const auto& e : dir) {
-					if (!reflect::IsLive(e.box) || !reflect::IsLive(e.label)) {
-						return false;
-					}
+			for (const auto& e : g_all) {
+				if (!reflect::IsLive(e.box) || !reflect::IsLive(e.label)) {
+					return false;
 				}
 			}
-			return true;
+			return !g_all.empty();
+		}
+
+		void Show(UE::UObject* a_widget, bool a_visible)
+		{
+			ue::Call c(a_widget, L"SetVisibility");
+			c.Set("InVisibility", static_cast<std::uint8_t>(a_visible ? 3 : 1));
+			c.Run();
+		}
+
+		void Arrange()
+		{
+			for (auto& side : g_entries) {
+				side.clear();
+			}
+			const auto layout = input::Layout();
+			std::string summary;
+			for (auto& e : g_all) {
+				int side = -1;
+				for (const auto& f : layout) {
+					if (f.id == e.id) {
+						side = f.side;
+					}
+				}
+				if (side >= 0) {
+					g_entries[side].push_back(&e);
+				}
+				Show(e.box, side >= 0);
+				Show(e.label, side >= 0);
+			}
+			static constexpr const char* kSideName[kDirs] = { "up", "right", "down", "left" };
+			for (int d = 0; d < kDirs; ++d) {
+				const int n = static_cast<int>(g_entries[d].size());
+				for (int i = 0; i < n; ++i) {
+					const auto [x, y] = Place(d, i, n);
+					const double pos[2] = { x, y };
+					CallFirst(g_entries[d][i]->boxSlot, L"SetPosition", pos, sizeof(pos));
+					CallFirst(g_entries[d][i]->labelSlot, L"SetPosition", pos, sizeof(pos));
+					summary += std::format("{}{} {}", summary.empty() ? "" : ", ", g_entries[d][i]->id, kSideName[d]);
+				}
+			}
+			logger::info("menu: laid out from the Controls rows - {}", summary.empty() ? "nothing bound to a direction" : summary);
 		}
 
 		void SetVisible(bool a_visible)
@@ -299,6 +326,7 @@ namespace menu
 			if (g_root && !Alive()) {
 				logger::info("menu: its widgets are gone (a level change?) - building it again");
 				g_root = nullptr;
+				g_all.clear();
 				for (auto& dir : g_entries) {
 					dir.clear();
 				}
@@ -314,6 +342,7 @@ namespace menu
 				add.Set<std::int32_t>("ZOrder", 50);
 				add.Run();
 			}
+			Arrange();
 			SetVisible(true);
 			g_open = true;
 			g_cat = -1;
@@ -441,9 +470,9 @@ namespace menu
 			if (pressed & XINPUT_GAMEPAD_DPAD_LEFT) { Step(kLeft); }
 			if (pressed & XINPUT_GAMEPAD_DPAD_RIGHT) { Step(kRight); }
 			if (pressed & XINPUT_GAMEPAD_A) {
-				if (g_cat >= 0 && g_idx < static_cast<int>(kOptions[g_cat].size())) {
-					logger::info("menu: {} chosen", kOptions[g_cat][g_idx].label);
-					Close(kOptions[g_cat][g_idx].action);
+				if (g_cat >= 0 && g_idx < static_cast<int>(g_entries[g_cat].size())) {
+					logger::info("menu: {} chosen", g_entries[g_cat][g_idx]->id);
+					Close(g_entries[g_cat][g_idx]->action);
 				}
 			} else if (pressed & XINPUT_GAMEPAD_B) {
 				Close(nullptr);

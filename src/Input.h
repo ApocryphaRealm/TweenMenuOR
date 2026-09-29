@@ -23,6 +23,17 @@ namespace input
 {
 	void Tick();             // game thread, every tick
 	bool TakePressed();      // the tween key was pressed since the last call (gameplay only)
+
+	// M6: the menu's layout as the Controls page's "Tween Menu Layout" rows have it - one entry per function, side =
+	// the D-pad direction bound to its row (0 up, 1 right, 2 down, 3 left; -1 = not in the menu). Kept in the INI.
+	struct LayoutEntry
+	{
+		std::string    id;
+		std::wstring   label;
+		const wchar_t* action;
+		int            side;
+	};
+	std::vector<LayoutEntry> Layout();
 	bool TweenKeyPressedOnPad(WORD a_pressed);   // the tween key is a controller button and it is among a_pressed (XInput bits)
 
 	struct Status

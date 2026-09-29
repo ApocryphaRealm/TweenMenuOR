@@ -2,6 +2,7 @@
 #include "Input.h"
 #include "Menu.h"
 #include "Settings.h"
+#include "SystemPage.h"
 #include "Tick.h"
 #include "Tool.h"
 
@@ -16,6 +17,7 @@ namespace
 			menu::Toggle();
 		}
 		menu::Tick();
+		systempage::Tick();
 		static bool toolRegistered = false;
 		static std::uint64_t n = 0;
 		if (!toolRegistered && ++n % 60 == 0) {

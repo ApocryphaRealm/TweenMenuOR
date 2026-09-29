@@ -268,15 +268,53 @@ namespace menu
 			return made > 0;
 		}
 
+		// The menu is built once and stays on the viewport, shown and hidden: taken off it, nothing holds the widgets
+		// and the garbage collector frees them - the crash of 2026-09-29 03:19 (Toggle on a freed root). A level change
+		// can still take viewport widgets away, so each open checks they are alive and on the viewport.
+		bool Alive()
+		{
+			if (!g_root || !reflect::IsLive(g_root)) {
+				return false;
+			}
+			for (const auto& dir : g_entries) {
+				for (const auto& e : dir) {
+					if (!reflect::IsLive(e.box) || !reflect::IsLive(e.label)) {
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+
+		void SetVisible(bool a_visible)
+		{
+			const std::uint8_t vis = a_visible ? 3 : 1;   // ESlateVisibility: HitTestInvisible (drawn, never takes the mouse) / Collapsed
+			ue::Call c(g_root, L"SetVisibility");
+			c.Set("InVisibility", vis);
+			c.Run();
+		}
+
 		void Open()
 		{
+			if (g_root && !Alive()) {
+				logger::info("menu: its widgets are gone (a level change?) - building it again");
+				g_root = nullptr;
+				for (auto& dir : g_entries) {
+					dir.clear();
+				}
+			}
 			if (!g_root && !Build()) {
 				logger::warn("menu: cannot open - {}", g_problem);
 				return;
 			}
-			ue::Call add(g_root, L"AddToViewport");
-			add.Set<std::int32_t>("ZOrder", 50);
-			add.Run();
+			ue::Call in(g_root, L"IsInViewport");
+			in.Run();
+			if (!in.Get<bool>("ReturnValue")) {
+				ue::Call add(g_root, L"AddToViewport");
+				add.Set<std::int32_t>("ZOrder", 50);
+				add.Run();
+			}
+			SetVisible(true);
 			g_open = true;
 			g_cat = -1;
 			g_idx = 0;
@@ -286,8 +324,9 @@ namespace menu
 
 		void Close(const wchar_t* a_then)
 		{
-			ue::Call rm(g_root, L"RemoveFromParent");
-			rm.Run();
+			if (Alive()) {
+				SetVisible(false);
+			}
 			g_open = false;
 			g_drain = true;
 			g_pendingAction = a_then;

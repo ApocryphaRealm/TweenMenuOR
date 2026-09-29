@@ -276,28 +276,76 @@ namespace input
 			return g_action != nullptr;
 		}
 
-		// Our bindings, (re)asserted: the tween key on the INI's keys, Wait off them, Start on System. Applying changes on
-		// the Controls page re-applies the game's saved rebind map - which knows nothing of our action (the game drops its
-		// entries when it loads the map, before any plugin can make the action) and still has Wait on Select - so this
-		// runs again whenever our key is found missing (found 2026-09-29: Apply left the tween menu "bound to nothing").
-		void Assert()
+		// the keys an action has in IMC_Game_Default now ("None" entries - an action kept in the context unbound - left out)
+		std::vector<std::string> KeysOf(UE::UObject* a_action)
 		{
-			const auto& s = settings::Get();
-			if (auto* wait = FindMappedAction(g_imc, kWaitAction)) {
-				for (const auto& key : { s.gamepadKey, s.keyboardKey }) {
-					if (IsMapped(g_imc, wait, key) && UnmapKey(g_imc, wait, key)) {
-						++g_status.waitKeysMoved;
-						logger::info("input: Wait no longer on {} (it is a tween menu option)", key);
-					}
+			std::vector<std::string> keys;
+			const auto m = Mappings();
+			auto* arr = a_action ? MappingArray(g_imc) : nullptr;
+			for (std::int32_t i = 0; arr && m.size > 0 && m.action >= 0 && m.key >= 0 && i < arr->num; ++i) {
+				std::uint8_t* e = arr->data + static_cast<std::ptrdiff_t>(i) * m.size;
+				if (*reinterpret_cast<UE::UObject**>(e + m.action) != a_action) {
+					continue;
+				}
+				const auto name = pe::Utf8(reinterpret_cast<const UE::FName*>(e + m.key)->ToString());
+				if (name != "None" && std::find(keys.begin(), keys.end(), name) == keys.end()) {
+					keys.push_back(name);
 				}
 			}
-			if (s.startOpensSystem) {
-				StartOpensSystem();
+			return keys;
+		}
+
+		// The linked mapping (the owner, 2026-09-29: "wherever the wait button is bound, the tween menu follows" - "it will
+		// just use the key binding for wait, not the function, so that the tween menu takes over the wait menu
+		// functionality"). Every key the game gives Wait in IMC_Game_Default - from the saved Controls, after a rebind and
+		// Apply on the Controls page, or when the game re-applies its saved map after a menu (seen 2026-09-29, logic library
+		// 7701) - moves to our action, and our action gives up any key Wait no longer has. Wait's entries stay in the
+		// context with no key, so the tween menu's own Wait option still opens it. Nothing the game saves is touched: the
+		// Controls page's Wait row IS the tween menu's button. Start is put on System the same way. Returns whether the
+		// context changed (Enhanced Input is then asked to rebuild).
+		bool Sync()
+		{
+			bool changed = false;
+			auto* wait = FindMappedAction(g_imc, kWaitAction);
+			const auto waitKeys = KeysOf(wait);
+			if (!waitKeys.empty()) {
+				for (const auto& key : KeysOf(g_action)) {
+					if (std::find(waitKeys.begin(), waitKeys.end(), key) == waitKeys.end() && UnmapKey(g_imc, g_action, key)) {
+						logger::info("input: the tween menu is off {} (Wait is no longer bound there)", key);
+						changed = true;
+					}
+				}
+				for (const auto& key : waitKeys) {
+					const bool off = UnmapKey(g_imc, wait, key);
+					const bool on = IsMapped(g_imc, g_action, key) || MapKey(g_imc, g_action, key);
+					++g_status.waitKeysMoved;
+					logger::info("input: Wait's {} opens the tween menu now (Wait off it: {}, tween menu on it: {})", key, off ? "ok" : "FAILED", on ? "ok" : "FAILED");
+					changed = true;
+				}
 			}
-			const bool pad = IsMapped(g_imc, g_action, s.gamepadKey) || MapKey(g_imc, g_action, s.gamepadKey);
-			const bool kb = IsMapped(g_imc, g_action, s.keyboardKey) || MapKey(g_imc, g_action, s.keyboardKey);
-			g_status.mapped = pad && kb;
-			logger::info("input: {} on {} ({}) and {} ({})", NameOf(g_action), s.gamepadKey, pad ? "ok" : "FAILED", s.keyboardKey, kb ? "ok" : "FAILED");
+			if (settings::Get().startOpensSystem) {
+				auto* system = FindMappedAction(g_imc, "IA_Game_Default_OpenOptionsMenu");
+				if (system && !IsMapped(g_imc, system, "Gamepad_Special_Right")) {
+					StartOpensSystem();
+					changed = true;
+				}
+			}
+			const auto keys = KeysOf(g_action);
+			std::string text;
+			g_keys.clear();
+			for (const auto& key : keys) {
+				text += (text.empty() ? "" : ", ") + key;
+				g_keys.emplace_back(std::wstring(key.begin(), key.end()).c_str());
+			}
+			g_status.mapped = !keys.empty();
+			if (text != g_status.boundKeys) {
+				logger::info("input: the tween menu is bound to {} (Wait's keys on the Controls page)", text.empty() ? "nothing" : text);
+				g_status.boundKeys = text;
+			}
+			if (changed) {
+				RebuildMappings();
+			}
+			return changed;
 		}
 
 		void Setup()
@@ -318,78 +366,7 @@ namespace input
 				return;
 			}
 			logger::info("input: {} created", NameOf(g_action));
-
-			Assert();
-			RebuildMappings();
-		}
-
-		// The rest of what Assert() sets, lost while our own mappings survive: found 2026-09-29, after the Magic menu opened
-		// from the tween menu had closed, IMC_Game_Default held the saved map again (Wait on T and Select, Start on the
-		// Character menu) beside our untouched IA_TweenMenu_Open - so checking our keys alone never re-asserted, and T
-		// opened Wait (menu mode left gameplay in that same frame, so the tween key was never seen).
-		bool Drifted()
-		{
-			const auto& s = settings::Get();
-			if (auto* wait = FindMappedAction(g_imc, kWaitAction)) {
-				if (IsMapped(g_imc, wait, s.gamepadKey) || IsMapped(g_imc, wait, s.keyboardKey)) {
-					return true;
-				}
-			}
-			if (s.startOpensSystem) {
-				auto* system = FindMappedAction(g_imc, "IA_Game_Default_OpenOptionsMenu");
-				if (system && !IsMapped(g_imc, system, "Gamepad_Special_Right")) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		// the keys bound to our action now (followed so a rebind on the Controls page takes effect)
-		void RefreshKeys()
-		{
-			auto* cls = UE::StaticFindObject<UE::UClass>(nullptr, nullptr, L"/Script/EnhancedInput.EnhancedInputLocalPlayerSubsystem");
-			for (auto* sub : reflect::Instances(cls)) {
-				Call c(sub, L"QueryKeysMappedToAction");
-				if (!c) {
-					continue;
-				}
-				c.Set("Action", g_action);
-				c.Run();
-				auto* ret = static_cast<RawArray*>(c.At("ReturnValue"));
-				if (!ret) {
-					continue;
-				}
-				std::vector<UE::FName> keys;
-				std::string text;
-				for (std::int32_t i = 0; i < ret->num; ++i) {
-					const auto& name = *reinterpret_cast<const UE::FName*>(ret->data + static_cast<std::ptrdiff_t>(i) * sizeof(UE::FKey));
-					keys.push_back(name);
-					text += (text.empty() ? "" : ", ") + pe::Utf8(name.ToString());
-					reinterpret_cast<UE::FKey*>(ret->data + static_cast<std::ptrdiff_t>(i) * sizeof(UE::FKey))->~FKey();
-				}
-				if (ret->data) {
-					UE::FMemory::Free(ret->data);   // the engine's array: its keys destroyed above, then the storage
-				}
-				if (text != g_status.boundKeys) {
-					logger::info("input: the tween menu is bound to {}", text.empty() ? "nothing" : text);
-					g_status.boundKeys = text;
-				}
-				const auto& s = settings::Get();
-				const auto has = [&](const std::string& a_key) {
-					return std::any_of(keys.begin(), keys.end(), [&](const UE::FName& n) { return pe::Utf8(n.ToString()) == a_key; });
-				};
-				if (!has(s.gamepadKey) || !has(s.keyboardKey)) {
-					logger::info("input: our key is gone (the Controls page applied its saved map?) - putting it back");
-					Assert();
-					RebuildMappings();
-				} else if (Drifted()) {
-					logger::info("input: the game re-applied its saved bindings (Wait back on our keys or Start off System) - putting ours back");
-					Assert();
-					RebuildMappings();
-				}
-				g_keys = std::move(keys);
-				return;
-			}
+			Sync();
 		}
 
 		UE::UObject* PlayerController()
@@ -449,9 +426,9 @@ namespace input
 		if (!g_action || !inGameplay) {
 			return;
 		}
-		// checked the moment a menu hands back gameplay (a menu's close can re-apply the saved bindings) and every 60 ticks
-		if (g_keys.empty() || backInGameplay || g_tickCount % 60 == 0) {
-			RefreshKeys();
+		// followed the moment a menu hands back gameplay (a menu's close can re-apply the saved bindings) and every 60 ticks
+		if (backInGameplay || g_tickCount % 60 == 0) {
+			Sync();
 		}
 		auto* pc = PlayerController();
 		if (!pc) {

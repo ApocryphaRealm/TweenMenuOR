@@ -23,18 +23,6 @@ namespace settings
 			const int v = static_cast<int>(GetPrivateProfileIntW(a_section, a_key, a_default, a_ini.c_str()));
 			return std::clamp(v, a_min, a_max);
 		}
-
-		std::string ReadString(const std::filesystem::path& a_ini, const wchar_t* a_section, const wchar_t* a_key, const std::string& a_default)
-		{
-			wchar_t buf[256]{};
-			const std::wstring def(a_default.begin(), a_default.end());
-			GetPrivateProfileStringW(a_section, a_key, def.c_str(), buf, 256, a_ini.c_str());
-			std::string out;
-			for (const wchar_t* p = buf; *p; ++p) {
-				out += static_cast<char>(*p < 128 ? *p : '?');
-			}
-			return out;
-		}
 	}
 
 	std::filesystem::path PluginFolder()
@@ -48,13 +36,11 @@ namespace settings
 		Values v;
 		if (std::filesystem::exists(ini)) {
 			v.logLevel = ReadInt(ini, L"Log", L"uLogLevel", v.logLevel, 0, 4);
-			v.gamepadKey = ReadString(ini, L"Keys", L"sGamepadKey", v.gamepadKey);
-			v.keyboardKey = ReadString(ini, L"Keys", L"sKeyboardKey", v.keyboardKey);
 			v.systemOpensFirstPage = ReadInt(ini, L"Keys", L"bSystemOpensFirstPage", v.systemOpensFirstPage ? 1 : 0, 0, 1) != 0;
 			v.startOpensSystem = ReadInt(ini, L"Keys", L"bStartOpensSystem", v.startOpensSystem ? 1 : 0, 0, 1) != 0;
 			g_values = v;
-			logger::info("settings: {} read (uLogLevel={}, sGamepadKey={}, sKeyboardKey={}, bStartOpensSystem={}, bSystemOpensFirstPage={})",
-				ini.string(), v.logLevel, v.gamepadKey, v.keyboardKey, v.startOpensSystem, v.systemOpensFirstPage);
+			logger::info("settings: {} read (uLogLevel={}, bStartOpensSystem={}, bSystemOpensFirstPage={})",
+				ini.string(), v.logLevel, v.startOpensSystem, v.systemOpensFirstPage);
 		} else {
 			g_values = v;
 			logger::warn("settings: {} not found - compiled defaults in use", ini.string());

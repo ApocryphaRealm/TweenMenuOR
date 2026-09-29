@@ -22,6 +22,7 @@
 namespace input
 {
 	void Tick();             // game thread, every tick
+	bool CreateEarly();      // at OBSE's post-load: our input actions, if the engine can make objects yet
 	bool TakePressed();      // the tween key was pressed since the last call (gameplay only)
 
 	// M6: the menu's layout as the Controls page's "Tween Menu Layout" rows have it - one entry per function, side =

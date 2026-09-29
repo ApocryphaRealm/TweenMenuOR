@@ -89,6 +89,22 @@ namespace ue
 		std::vector<std::uint8_t> m_params;
 	};
 
+	// the player controller's IsInputKeyDown - a key's state now, whatever device (safe to ask more than once a frame,
+	// unlike WasInputKeyJustPressed)
+	inline bool KeyDown(UE::UObject* a_pc, const UE::FName& a_key)
+	{
+		Call c(a_pc, L"IsInputKeyDown");
+		void* k = c ? c.At("Key") : nullptr;
+		if (!k) {
+			return false;
+		}
+		new (k) UE::FKey(a_key);
+		c.Run();
+		static_cast<UE::FKey*>(k)->~FKey();   // the engine may attach its key details: released every call
+		const bool* down = static_cast<const bool*>(c.At("ReturnValue"));
+		return down && *down;
+	}
+
 	// the first live object whose class is a_base or derives from it (not a class default object)
 	inline UE::UObject* FirstOf(UE::UClass* a_base)
 	{

@@ -1,6 +1,7 @@
 #include "Menu.h"
 
 #include "Input.h"
+#include "Strings.h"
 #include "Ue.h"
 
 namespace menu
@@ -321,8 +322,21 @@ namespace menu
 			c.Run();
 		}
 
+		std::string g_builtLanguage;
+
 		void Open()
 		{
+			strings::Refresh();
+			if (g_root && Alive() && strings::Language() != g_builtLanguage) {
+				logger::info("menu: the game's language changed ({} -> {}) - building it again", g_builtLanguage, strings::Language());
+				ue::Call rm(g_root, L"RemoveFromParent");
+				rm.Run();
+				g_root = nullptr;
+				g_all.clear();
+				for (auto& dir : g_entries) {
+					dir.clear();
+				}
+			}
 			if (g_root && !Alive()) {
 				logger::info("menu: its widgets are gone (a level change?) - building it again");
 				g_root = nullptr;
@@ -331,9 +345,12 @@ namespace menu
 					dir.clear();
 				}
 			}
-			if (!g_root && !Build()) {
-				logger::warn("menu: cannot open - {}", g_problem);
-				return;
+			if (!g_root) {
+				if (!Build()) {
+					logger::warn("menu: cannot open - {}", g_problem);
+					return;
+				}
+				g_builtLanguage = strings::Language();
 			}
 			ue::Call in(g_root, L"IsInViewport");
 			in.Run();
@@ -486,6 +503,39 @@ namespace menu
 			}
 			std::memset(&pad, 0, sizeof(pad));
 			a_state->dwPacketNumber += ++g_packetBump;
+		}
+	}
+
+	// The keyboard while the menu is open: the arrow keys, Enter and Backspace never reach the player controller (the
+	// game's UI layer takes them as navigation - found 2026-09-29: IsInputKeyDown saw T but no arrow), so they are read
+	// straight from Windows, and only while the game's window is the one in front.
+	void Keys()
+	{
+		static const std::pair<int, int> kKeys[] = {
+			{ VK_UP, kUp }, { VK_RIGHT, kRight }, { VK_DOWN, kDown }, { VK_LEFT, kLeft }, { VK_RETURN, 10 }, { VK_BACK, 11 },
+		};
+		static bool s_was[std::size(kKeys)]{};
+		DWORD pid = 0;
+		GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+		const bool front = pid == GetCurrentProcessId();
+		for (std::size_t i = 0; i < std::size(kKeys); ++i) {
+			const bool down = front && (GetAsyncKeyState(kKeys[i].first) & 0x8000) != 0;
+			const bool pressed = down && !s_was[i];
+			s_was[i] = down;
+			if (!pressed || !g_open) {
+				continue;
+			}
+			const int what = kKeys[i].second;
+			if (what < kDirs) {
+				Step(what);
+			} else if (what == 10) {
+				if (g_cat >= 0 && g_idx < static_cast<int>(g_entries[g_cat].size())) {
+					logger::info("menu: {} chosen (keyboard)", g_entries[g_cat][g_idx]->id);
+					Close(g_entries[g_cat][g_idx]->action);
+				}
+			} else {
+				Close(nullptr);
+			}
 		}
 	}
 

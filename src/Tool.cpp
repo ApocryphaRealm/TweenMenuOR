@@ -28,7 +28,7 @@ namespace tool
 		json State()
 		{
 			const auto s = input::GetStatus();
-			return { { "version", TWM_VERSION }, { "layout", settings::Get().layout }, { "ticks", tick::Reads() },
+			return { { "version", TWM_VERSION }, { "ticks", tick::Reads() },
 				{ "action_created", s.actionCreated }, { "mapped", s.mapped }, { "wait_keys_moved", s.waitKeysMoved },
 				{ "rows_added", s.rowsAdded }, { "bound_keys", s.boundKeys }, { "presses", s.presses }, { "problem", s.problem },
 				{ "menu", menu::Status() } };

@@ -48,42 +48,17 @@ namespace settings
 		Values v;
 		if (std::filesystem::exists(ini)) {
 			v.logLevel = ReadInt(ini, L"Log", L"uLogLevel", v.logLevel, 0, 4);
-			v.layout = ReadString(ini, L"Layout", L"sLayout", v.layout);
 			v.gamepadKey = ReadString(ini, L"Keys", L"sGamepadKey", v.gamepadKey);
 			v.keyboardKey = ReadString(ini, L"Keys", L"sKeyboardKey", v.keyboardKey);
 			v.systemOpensFirstPage = ReadInt(ini, L"Keys", L"bSystemOpensFirstPage", v.systemOpensFirstPage ? 1 : 0, 0, 1) != 0;
 			v.startOpensSystem = ReadInt(ini, L"Keys", L"bStartOpensSystem", v.startOpensSystem ? 1 : 0, 0, 1) != 0;
 			g_values = v;
-			logger::info("settings: {} read (uLogLevel={}, sLayout={}, sGamepadKey={}, sKeyboardKey={})", ini.string(), v.logLevel, v.layout,
-				v.gamepadKey, v.keyboardKey);
+			logger::info("settings: {} read (uLogLevel={}, sGamepadKey={}, sKeyboardKey={}, bStartOpensSystem={}, bSystemOpensFirstPage={})",
+				ini.string(), v.logLevel, v.gamepadKey, v.keyboardKey, v.startOpensSystem, v.systemOpensFirstPage);
 		} else {
 			g_values = v;
 			logger::warn("settings: {} not found - compiled defaults in use", ini.string());
 		}
-	}
-
-	void SaveKeys(const std::string& a_gamepadKey, const std::string& a_keyboardKey)
-	{
-		const auto ini = PluginFolder() / L"TweenMenu.ini";
-		const std::wstring pad(a_gamepadKey.begin(), a_gamepadKey.end());
-		const std::wstring kb(a_keyboardKey.begin(), a_keyboardKey.end());
-		WritePrivateProfileStringW(L"Keys", L"sGamepadKey", pad.c_str(), ini.c_str());
-		WritePrivateProfileStringW(L"Keys", L"sKeyboardKey", kb.c_str(), ini.c_str());
-		g_values.gamepadKey = a_gamepadKey;
-		g_values.keyboardKey = a_keyboardKey;
-		logger::info("settings: the tween keys saved to {} (sGamepadKey={}, sKeyboardKey={})", ini.filename().string(), a_gamepadKey, a_keyboardKey);
-	}
-
-	std::string ReadIni(const char* a_section, const std::string& a_key, const std::string& a_default)
-	{
-		const std::wstring sec(a_section, a_section + std::strlen(a_section)), key(a_key.begin(), a_key.end());
-		return ReadString(PluginFolder() / L"TweenMenu.ini", sec.c_str(), key.c_str(), a_default);
-	}
-
-	void WriteIni(const char* a_section, const std::string& a_key, const std::string& a_value)
-	{
-		const std::wstring sec(a_section, a_section + std::strlen(a_section)), key(a_key.begin(), a_key.end()), val(a_value.begin(), a_value.end());
-		WritePrivateProfileStringW(sec.c_str(), key.c_str(), val.c_str(), (PluginFolder() / L"TweenMenu.ini").c_str());
 	}
 
 	const Values& Get()

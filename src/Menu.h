@@ -23,5 +23,6 @@ namespace menu
 	bool IsOpen();
 	void OnPad(XINPUT_STATE* a_state);      // every controller read on the game thread (nullptr: no pad)
 	void Tick();                            // every tick: fires a chosen option once the menu has gone
+	void Keys();                            // every tick: the keyboard - arrows move, Enter opens, Backspace closes
 	std::string Status();
 }

@@ -5,6 +5,8 @@
 #include "PEHook.h"
 #include "Reflect.h"
 #include "Settings.h"
+#include "Strings.h"
+#include "Ue.h"
 
 namespace input
 {
@@ -173,242 +175,26 @@ namespace input
 
 		// ---- the Controls page rows ----
 
-		struct RowSpec
-		{
-			std::wstring label;
-			bool         header = false;
-			UE::UObject* action = nullptr;
-			UE::UObject* context = nullptr;
-			std::string  padKey = "None";
-			std::string  kbKey = "None";
-			int          category = -1;   // -1: as the model row
-		};
-
-		enum class Where
-		{
-			kBeforeMenuSection,   // before the Menu section's first row (OpenCharacter): the Tween Menu key's row
-			kAfterMenuSection,    // after the Menu section's last row: the Tween Menu layout section
-		};
-
-		int InsertRows(const wchar_t* a_tablePath, const char* a_what, const std::vector<RowSpec>& a_rows, Where a_where)
-		{
-			auto* table = Find(a_tablePath);
-			auto* rowStruct = Struct(L"/Script/Altar.ModernRebindSettingTableRow");
-			auto* dataStruct = Struct(L"/Script/Altar.ModernRebindData");
-			if (!table || !rowStruct || !dataStruct || a_rows.empty()) {
-				if (table) {
-					logger::warn("input: the row structs are not loaded - no {} rows", a_what);
-				}
-				return 0;
-			}
-			auto* arr = reflect::At<RawArray>(table, reflect::Offset(table->GetClass(), "RebindSettings"));
-			const std::int32_t size = rowStruct->propertiesSize;
-			const auto oLabel = reflect::Offset(rowStruct, "Label");
-			const auto oType = reflect::Offset(rowStruct, "Type");
-			const auto oData = reflect::Offset(rowStruct, "RebindData");
-			const auto oAction = reflect::Offset(dataStruct, "InputAction");
-			const auto oContext = reflect::Offset(dataStruct, "MappingContext");
-			const auto oCategory = reflect::Offset(dataStruct, "DefaultCategory");
-			const auto oPad = reflect::Offset(dataStruct, "DefaultPrimaryGamepadKey");
-			const auto oKey1 = reflect::Offset(dataStruct, "DefaultPrimaryKeyboardKey");
-			const auto oKey2 = reflect::Offset(dataStruct, "DefaultSecondaryKeyboardKey");
-			if (!arr || size <= 0 || oLabel < 0 || oType < 0 || oData < 0 || oAction < 0 || oContext < 0 || oCategory < 0 || oPad < 0 || oKey1 < 0 ||
-				oKey2 < 0) {
-				logger::error("input: the {} table's row layout is not as read (size {}, Label {}, Type {}, RebindData {}) - no rows", a_what, size,
-					oLabel, oType, oData);
-				return 0;
-			}
-			const auto actionOf = [&](std::int32_t i) { return *reinterpret_cast<UE::UObject**>(arr->data + static_cast<std::ptrdiff_t>(i) * size + oData + oAction); };
-			const auto typeOf = [&](std::int32_t i) { return arr->data[static_cast<std::ptrdiff_t>(i) * size + oType]; };
-
-			UE::UObject* probe = nullptr;
-			for (const auto& r : a_rows) {
-				if (r.action) {
-					probe = r.action;
-					break;
-				}
-			}
-			std::int32_t menuFirst = -1, actionModel = -1, headerModel = -1;
-			for (std::int32_t i = 0; i < arr->num; ++i) {
-				auto* act = actionOf(i);
-				if (probe && act == probe) {
-					return 0;   // already there
-				}
-				if (act && menuFirst < 0 && NameOf(act) == kFirstMenuAction) {
-					menuFirst = i;
-				}
-				if (act && actionModel < 0) {
-					actionModel = i;
-				}
-				if (!act && headerModel < 0) {
-					headerModel = i;
-				}
-			}
-			if (actionModel < 0 || headerModel < 0) {
-				logger::error("input: the {} table has no rows to model ours on", a_what);
-				return 0;
-			}
-			std::int32_t at = arr->num;
-			if (menuFirst >= 0) {
-				if (a_where == Where::kBeforeMenuSection) {
-					at = menuFirst;
-				} else {
-					at = menuFirst;
-					while (at < arr->num && actionOf(at)) {
-						++at;   // to the next header (or the end): after the Menu section's last row
-					}
-				}
-			}
-			const std::int32_t n = static_cast<std::int32_t>(a_rows.size());
-			std::vector<std::uint8_t> ours(static_cast<std::size_t>(size) * n, 0);
-			for (std::int32_t k = 0; k < n; ++k) {
-				const auto& spec = a_rows[k];
-				std::uint8_t* row = ours.data() + static_cast<std::ptrdiff_t>(k) * size;
-				const std::uint8_t* like = arr->data + static_cast<std::ptrdiff_t>(spec.header ? headerModel : actionModel) * size;
-				new (row + oLabel) UE::FText(UE::FText::AsCultureInvariant(UE::FString(spec.label.c_str())));
-				row[oType] = like[oType];
-				std::uint8_t* data = row + oData;
-				if (spec.category >= 0) {
-					data[oCategory] = static_cast<std::uint8_t>(spec.category);
-				} else {
-					std::memcpy(data + oCategory, like + oData + oCategory, 1);
-				}
-				*reinterpret_cast<UE::UObject**>(data + oAction) = spec.action;
-				*reinterpret_cast<UE::UObject**>(data + oContext) = spec.context;
-				SetKey(data + oPad, spec.padKey);
-				SetKey(data + oKey1, spec.kbKey);
-				SetKey(data + oKey2, "None");
-			}
-			// the array grows by n, ours at `at` (elements are moved bitwise - a relocation, never a copy)
-			auto* grown = static_cast<std::uint8_t*>(UE::FMemory::Malloc(static_cast<std::size_t>(arr->num + n) * size, 16));
-			if (!grown) {
-				return 0;
-			}
-			std::memcpy(grown, arr->data, static_cast<std::size_t>(at) * size);
-			std::memcpy(grown + static_cast<std::ptrdiff_t>(at) * size, ours.data(), static_cast<std::size_t>(n) * size);
-			std::memcpy(grown + static_cast<std::ptrdiff_t>(at + n) * size, arr->data + static_cast<std::ptrdiff_t>(at) * size,
-				static_cast<std::size_t>(arr->num - at) * size);
-			UE::FMemory::Free(arr->data);
-			arr->data = grown;
-			arr->num += n;
-			arr->max = arr->num;
-			logger::info("input: {} row{} added to the {} Controls page at row {} of {}", n, n == 1 ? "" : "s", a_what, at + 1, arr->num);
-			return n;
-		}
-
-		// ---- the tween layout (M6): a row per function, the direction bound to it = its side ----
-
+		// ---- the tween menu's functions and their sides ----
+		// Fixed for 1.0 (the owner, 2026-09-29: "keep my most current layout ... magic on left, inventory on right, with
+		// the character menu and quest above and the map and wait menu below"; rebinding from the Controls page
+		// postponed). Each opens through the game's own input action.
 		struct Function
 		{
 			const char*    id;
-			const wchar_t* label;
+			const char*    label;    // English; the shown text is TR("TWM_<id>", label)
 			const wchar_t* action;   // the game's own input action that opens it
 			int            side;     // default: 0 up, 1 right, 2 down, 3 left, -1 not in the menu
 		};
 
-		const std::array<Function, 10> kFunctions{ {
-			{ "Character", L"Character", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenStatsMenu.IA_Game_Default_OpenStatsMenu", 0 },
-			{ "Quests", L"Quests", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenQuestMenu.IA_Game_Default_OpenQuestMenu", 0 },
-			{ "Inventory", L"Inventory", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenInventoryMenu.IA_Game_Default_OpenInventoryMenu", 1 },
-			{ "Magic", L"Magic", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenMagicMenu.IA_Game_Default_OpenMagicMenu", 1 },
-			{ "Map", L"Map", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenMapMenu.IA_Game_Default_OpenMapMenu", 2 },
-			{ "Wait", L"Wait", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenRestMenu.IA_Game_Default_OpenRestMenu", 2 },
-			{ "System", L"System", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenOptionsMenu.IA_Game_Default_OpenOptionsMenu", 3 },
-			{ "Help", L"Help", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenHelpMenu.IA_Game_Default_OpenHelpMenu", 3 },
-			{ "QuickSave", L"Quick Save", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_QuickSave.IA_Game_Default_QuickSave", -1 },
-			{ "QuickLoad", L"Quick Load", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_QuickLoad.IA_Game_Default_QuickLoad", -1 },
+		const std::array<Function, 6> kFunctions{ {
+			{ "Character", "Character", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenStatsMenu.IA_Game_Default_OpenStatsMenu", 0 },
+			{ "Quests", "Quests", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenQuestMenu.IA_Game_Default_OpenQuestMenu", 0 },
+			{ "Inventory", "Inventory", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenInventoryMenu.IA_Game_Default_OpenInventoryMenu", 1 },
+			{ "Magic", "Magic", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenMagicMenu.IA_Game_Default_OpenMagicMenu", 3 },
+			{ "Map", "Map", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenMapMenu.IA_Game_Default_OpenMapMenu", 2 },
+			{ "Wait", "Wait", L"/Game/Dev/Input/GamePlay/InputActions/Default/IA_Game_Default_OpenRestMenu.IA_Game_Default_OpenRestMenu", 2 },
 		} };
-		constexpr std::array<const char*, 4> kPadSide{ "Gamepad_DPad_Up", "Gamepad_DPad_Right", "Gamepad_DPad_Down", "Gamepad_DPad_Left" };
-		constexpr std::array<const char*, 4> kKeySide{ "Up", "Right", "Down", "Left" };
-
-		UE::UObject* g_layoutImc = nullptr;   // our own mapping context - never applied to the player
-		std::array<UE::UObject*, kFunctions.size()> g_slotActions{};
-
-		std::vector<std::string> KeysOf(UE::UObject* a_imc, UE::UObject* a_action)
-		{
-			std::vector<std::string> out;
-			const auto m = Mappings();
-			auto* arr = a_imc ? MappingArray(a_imc) : nullptr;
-			for (std::int32_t i = 0; arr && m.size > 0 && i < arr->num; ++i) {
-				std::uint8_t* e = arr->data + static_cast<std::ptrdiff_t>(i) * m.size;
-				if (*reinterpret_cast<UE::UObject**>(e + m.action) == a_action) {
-					out.push_back(pe::Utf8(reinterpret_cast<const UE::FName*>(e + m.key)->ToString()));
-				}
-			}
-			return out;
-		}
-
-		// The Controls page shows a row's keys from the player's ACTIVE mapping contexts (found 2026-09-29: the layout
-		// rows showed empty, red-bordered, while their context was not applied). So the layout context is applied -
-		// at the lowest priority, its actions consuming nothing and bound to nothing, so it never changes play.
-		void ApplyLayoutContext()
-		{
-			auto* cls = UE::StaticFindObject<UE::UClass>(nullptr, nullptr, L"/Script/EnhancedInput.EnhancedInputLocalPlayerSubsystem");
-			for (auto* sub : reflect::Instances(cls)) {
-				Call has(sub, L"HasMappingContext");
-				has.Set("MappingContext", g_layoutImc);
-				has.Run();
-				const auto* present = static_cast<const bool*>(has.At("ReturnValue"));
-				if (!present || *present) {
-					continue;
-				}
-				Call add(sub, L"AddMappingContext");
-				add.Set("MappingContext", g_layoutImc);
-				add.Set<std::int32_t>("Priority", -1000);
-				add.Run();
-				logger::info("input: the tween layout context applied (lowest priority - it only lets the Controls page show its keys)");
-			}
-		}
-
-		void SetupLayout(UE::UClass* a_actionClass)
-		{
-			auto* imcClass = UE::StaticFindObject<UE::UClass>(nullptr, nullptr, L"/Script/EnhancedInput.InputMappingContext");
-			const auto flags = static_cast<UE::EObjectFlags>(static_cast<std::int32_t>(UE::EObjectFlags::Public) | static_cast<std::int32_t>(UE::EObjectFlags::Standalone));
-			g_layoutImc = imcClass ? UE::NewObject<UE::UObject>(UE::GetTransientPackage(), imcClass, UE::FName(L"IMC_TweenMenu_Layout"), flags) : nullptr;
-			if (!g_layoutImc) {
-				logger::error("input: the tween layout's mapping context could not be created - no layout rows");
-				return;
-			}
-			std::vector<RowSpec> pad{ { L"Tween Menu Layout", true } }, kb{ { L"Tween Menu Layout", true } };
-			for (std::size_t i = 0; i < kFunctions.size(); ++i) {
-				const auto& f = kFunctions[i];
-				const std::string name = std::string("IA_TweenMenu_Slot_") + f.id;
-				g_slotActions[i] = UE::NewObject<UE::UObject>(UE::GetTransientPackage(), a_actionClass,
-					UE::FName(std::wstring(name.begin(), name.end()).c_str()), flags);
-				if (!g_slotActions[i]) {
-					continue;
-				}
-				const std::string padDefault = f.side >= 0 ? kPadSide[f.side] : "None";
-				const std::string kbDefault = f.side >= 0 ? kKeySide[f.side] : "None";
-				const std::string padKey = settings::ReadIni("TweenLayoutPad", f.id, padDefault);
-				const std::string kbKey = settings::ReadIni("TweenLayoutKeyboard", f.id, kbDefault);
-				// never takes a key from anything else (the context is also applied at the lowest priority)
-				if (const auto c = reflect::Offset(a_actionClass, "bConsumeInput"); c >= 0) {
-					*reflect::At<bool>(g_slotActions[i], c) = false;
-				}
-				if (padKey != "None") {
-					MapKey(g_layoutImc, g_slotActions[i], padKey);
-				}
-				if (kbKey != "None") {
-					MapKey(g_layoutImc, g_slotActions[i], kbKey);
-				}
-				const std::wstring label = std::wstring(L"Tween: ") + f.label;
-				// Its own rebind category per row: the Controls page refuses a key already used IN THE SAME CATEGORY
-				// (the Keyboard page's UI rows, category 1, share Q and E with gameplay, category 0). A category of its
-				// own lets any number of functions share one direction, and never touches a real binding - the owner,
-				// 2026-09-29: "these are separate D-pad functions ... we're just using them as a way to distinguish
-				// which direction of the menu it goes on".
-				const int category = 10 + static_cast<int>(i);
-				pad.push_back({ label, false, g_slotActions[i], g_layoutImc, padDefault, "None", category });
-				kb.push_back({ label, false, g_slotActions[i], g_layoutImc, "None", kbDefault, category });
-			}
-			g_status.rowsAdded += InsertRows(kPadTable, "Controller", pad, Where::kAfterMenuSection);
-			g_status.rowsAdded += InsertRows(kKeyTable, "Keyboard", kb, Where::kAfterMenuSection);
-			if (Find(kKeyTableFr)) {
-				g_status.rowsAdded += InsertRows(kKeyTableFr, "Keyboard (AZERTY)", kb, Where::kAfterMenuSection);
-			}
-		}
-
 		// The owner, 2026-09-29: the Start button (right, Menu) opens System - "the system part of the menu where you go
 		// to save and load saves" - instead of the tabbed menu's Character page. Whatever IMC_Game_Default has on Start
 		// gives it up; the game's own OpenOptionsMenu action takes it, and the Controller page's OpenSystem row gets
@@ -473,6 +259,47 @@ namespace input
 			logger::info("input: Enhanced Input asked to rebuild its mappings ({} player subsystem{})", n, n == 1 ? "" : "s");
 		}
 
+		// Our input action, rooted at creation (MarkAsRootSet): in a shipped game Standalone does not keep an object from
+		// the garbage collector, and an action made before anything referenced it was freed within seconds (the crash of
+		// 2026-09-29 03:58, FName::ToString on a freed action).
+		bool CreateActions()
+		{
+			if (g_action) {
+				return true;
+			}
+			auto* actionClass = UE::StaticFindObject<UE::UClass>(nullptr, nullptr, L"/Script/EnhancedInput.InputAction");
+			if (!actionClass) {
+				return false;
+			}
+			const auto flags = static_cast<UE::EObjectFlags>(static_cast<std::int32_t>(UE::EObjectFlags::Public) | static_cast<std::int32_t>(UE::EObjectFlags::Standalone) | static_cast<std::int32_t>(UE::EObjectFlags::MarkAsRootSet));
+			g_action = UE::NewObject<UE::UObject>(UE::GetTransientPackage(), actionClass, UE::FName(kOurAction), flags);
+			return g_action != nullptr;
+		}
+
+		// Our bindings, (re)asserted: the tween key on the INI's keys, Wait off them, Start on System. Applying changes on
+		// the Controls page re-applies the game's saved rebind map - which knows nothing of our action (the game drops its
+		// entries when it loads the map, before any plugin can make the action) and still has Wait on Select - so this
+		// runs again whenever our key is found missing (found 2026-09-29: Apply left the tween menu "bound to nothing").
+		void Assert()
+		{
+			const auto& s = settings::Get();
+			if (auto* wait = FindMappedAction(g_imc, kWaitAction)) {
+				for (const auto& key : { s.gamepadKey, s.keyboardKey }) {
+					if (IsMapped(g_imc, wait, key) && UnmapKey(g_imc, wait, key)) {
+						++g_status.waitKeysMoved;
+						logger::info("input: Wait no longer on {} (it is a tween menu option)", key);
+					}
+				}
+			}
+			if (s.startOpensSystem) {
+				StartOpensSystem();
+			}
+			const bool pad = IsMapped(g_imc, g_action, s.gamepadKey) || MapKey(g_imc, g_action, s.gamepadKey);
+			const bool kb = IsMapped(g_imc, g_action, s.keyboardKey) || MapKey(g_imc, g_action, s.keyboardKey);
+			g_status.mapped = pad && kb;
+			logger::info("input: {} on {} ({}) and {} ({})", NameOf(g_action), s.gamepadKey, pad ? "ok" : "FAILED", s.keyboardKey, kb ? "ok" : "FAILED");
+		}
+
 		void Setup()
 		{
 			reflect::SelfCheck();   // proves the property layout once (Improved Wheel Menu's rows::Tick did this there)
@@ -483,10 +310,7 @@ namespace input
 				return;   // not loaded yet: again next tick
 			}
 			g_done = true;
-			const auto& s = settings::Get();
-
-			g_action = UE::NewObject<UE::UObject>(UE::GetTransientPackage(), actionClass, UE::FName(kOurAction),
-				static_cast<UE::EObjectFlags>(static_cast<std::int32_t>(UE::EObjectFlags::Public) | static_cast<std::int32_t>(UE::EObjectFlags::Standalone)));
+			CreateActions();
 			g_status.actionCreated = g_action != nullptr;
 			if (!g_action) {
 				g_status.problem = "the input action could not be created";
@@ -495,37 +319,29 @@ namespace input
 			}
 			logger::info("input: {} created", NameOf(g_action));
 
-			// Wait gives up its default keys (only while it still has them); ours takes them
+			Assert();
+			RebuildMappings();
+		}
+
+		// The rest of what Assert() sets, lost while our own mappings survive: found 2026-09-29, after the Magic menu opened
+		// from the tween menu had closed, IMC_Game_Default held the saved map again (Wait on T and Select, Start on the
+		// Character menu) beside our untouched IA_TweenMenu_Open - so checking our keys alone never re-asserted, and T
+		// opened Wait (menu mode left gameplay in that same frame, so the tween key was never seen).
+		bool Drifted()
+		{
+			const auto& s = settings::Get();
 			if (auto* wait = FindMappedAction(g_imc, kWaitAction)) {
-				for (const auto& key : { s.gamepadKey, s.keyboardKey }) {
-					if (IsMapped(g_imc, wait, key)) {
-						if (UnmapKey(g_imc, wait, key)) {
-							++g_status.waitKeysMoved;
-							logger::info("input: Wait no longer on {} (it becomes a tween menu option)", key);
-						} else {
-							logger::warn("input: Wait could not be taken off {}", key);
-						}
-					}
+				if (IsMapped(g_imc, wait, s.gamepadKey) || IsMapped(g_imc, wait, s.keyboardKey)) {
+					return true;
 				}
 			}
 			if (s.startOpensSystem) {
-				StartOpensSystem();
+				auto* system = FindMappedAction(g_imc, "IA_Game_Default_OpenOptionsMenu");
+				if (system && !IsMapped(g_imc, system, "Gamepad_Special_Right")) {
+					return true;
+				}
 			}
-			const bool pad = MapKey(g_imc, g_action, s.gamepadKey);
-			const bool kb = MapKey(g_imc, g_action, s.keyboardKey);
-			g_status.mapped = pad && kb;
-			logger::info("input: {} mapped in {} to {} ({}) and {} ({})", NameOf(g_action), NameOf(g_imc), s.gamepadKey, pad ? "ok" : "FAILED",
-				s.keyboardKey, kb ? "ok" : "FAILED");
-
-			const std::vector<RowSpec> padRow{ { L"Tween Menu", false, g_action, g_imc, s.gamepadKey, "None" } };
-			const std::vector<RowSpec> kbRow{ { L"Tween Menu", false, g_action, g_imc, "None", s.keyboardKey } };
-			g_status.rowsAdded += InsertRows(kPadTable, "Controller", padRow, Where::kBeforeMenuSection);
-			g_status.rowsAdded += InsertRows(kKeyTable, "Keyboard", kbRow, Where::kBeforeMenuSection);
-			if (Find(kKeyTableFr)) {
-				g_status.rowsAdded += InsertRows(kKeyTableFr, "Keyboard (AZERTY)", kbRow, Where::kBeforeMenuSection);
-			}
-			SetupLayout(actionClass);
-			RebuildMappings();
+			return false;
 		}
 
 		// the keys bound to our action now (followed so a rebind on the Controls page takes effect)
@@ -557,19 +373,19 @@ namespace input
 				if (text != g_status.boundKeys) {
 					logger::info("input: the tween menu is bound to {}", text.empty() ? "nothing" : text);
 					g_status.boundKeys = text;
-					// a rebind on the Controls page: keep it in our INI (the game's own save cannot restore our action)
-					std::string pad, kb;
-					for (const auto& k : keys) {
-						const std::string n = pe::Utf8(k.ToString());
-						std::string& slot = n.starts_with("Gamepad_") ? pad : kb;
-						if (slot.empty()) {
-							slot = n;
-						}
-					}
-					const auto& s = settings::Get();
-					if ((!pad.empty() && pad != s.gamepadKey) || (!kb.empty() && kb != s.keyboardKey)) {
-						settings::SaveKeys(pad.empty() ? s.gamepadKey : pad, kb.empty() ? s.keyboardKey : kb);
-					}
+				}
+				const auto& s = settings::Get();
+				const auto has = [&](const std::string& a_key) {
+					return std::any_of(keys.begin(), keys.end(), [&](const UE::FName& n) { return pe::Utf8(n.ToString()) == a_key; });
+				};
+				if (!has(s.gamepadKey) || !has(s.keyboardKey)) {
+					logger::info("input: our key is gone (the Controls page applied its saved map?) - putting it back");
+					Assert();
+					RebuildMappings();
+				} else if (Drifted()) {
+					logger::info("input: the game re-applied its saved bindings (Wait back on our keys or Start off System) - putting ours back");
+					Assert();
+					RebuildMappings();
 				}
 				g_keys = std::move(keys);
 				return;
@@ -609,43 +425,54 @@ namespace input
 		}
 	}
 
+	bool CreateEarly()
+	{
+		return CreateActions();
+	}
+
 	void Tick()
 	{
 		++g_tickCount;
+		if (!g_action) {
+			CreateActions();
+		}
 		if (!g_done) {
 			if (g_tickCount % 30 == 0) {
 				Setup();
 			}
 			return;
 		}
-		if (g_layoutImc && g_tickCount % 120 == 0) {
-			ApplyLayoutContext();   // again after a load or anything that clears the player's contexts
-		}
-		if (!g_action || !InGameplay()) {
+		static bool s_wasInGameplay = false;
+		const bool inGameplay = InGameplay();
+		const bool backInGameplay = inGameplay && !s_wasInGameplay;
+		s_wasInGameplay = inGameplay;
+		if (!g_action || !inGameplay) {
 			return;
 		}
-		if (g_keys.empty() || g_tickCount % 60 == 0) {
+		// checked the moment a menu hands back gameplay (a menu's close can re-apply the saved bindings) and every 60 ticks
+		if (g_keys.empty() || backInGameplay || g_tickCount % 60 == 0) {
 			RefreshKeys();
 		}
 		auto* pc = PlayerController();
 		if (!pc) {
 			return;
 		}
+		// edges of IsInputKeyDown (the frame tick can run more than once a frame; "just pressed" would fire twice)
+		static std::vector<std::pair<std::string, bool>> s_down;
 		for (const auto& key : g_keys) {
-			Call c(pc, L"WasInputKeyJustPressed");
-			void* k = c ? c.At("Key") : nullptr;
-			if (!k) {
-				return;
+			const std::string name = pe::Utf8(key.ToString());
+			const bool down = ue::KeyDown(pc, key);
+			auto it = std::find_if(s_down.begin(), s_down.end(), [&](const auto& e) { return e.first == name; });
+			if (it == s_down.end()) {
+				s_down.emplace_back(name, down);
+				continue;
 			}
-			new (k) UE::FKey(key);
-			c.Run();
-			static_cast<UE::FKey*>(k)->~FKey();   // the engine may attach its key details: released every call
-			const bool* pressed = static_cast<const bool*>(c.At("ReturnValue"));
-			if (pressed && *pressed) {
+			const bool was = it->second;
+			it->second = down;
+			if (down && !was) {
 				g_pressed = true;
 				++g_status.presses;
-				logger::info("input: tween menu key {} pressed", pe::Utf8(key.ToString()));
-				break;
+				logger::info("input: tween menu key {} pressed", name);
 			}
 		}
 	}
@@ -675,37 +502,17 @@ namespace input
 	std::vector<LayoutEntry> Layout()
 	{
 		std::vector<LayoutEntry> out;
-		for (std::size_t i = 0; i < kFunctions.size(); ++i) {
-			const auto& f = kFunctions[i];
-			if (!g_slotActions[i]) {
-				continue;
+		// each label written out for translation-coverage.py (rule 66): TR("TWM_Character") TR("TWM_Quests")
+		// TR("TWM_Inventory") TR("TWM_Magic") TR("TWM_Map") TR("TWM_Wait")
+		for (const auto& f : kFunctions) {
+			const std::string key = std::string("TWM_") + f.id;
+			const std::string text = TR(key.c_str(), f.label);
+			const int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+			std::wstring label(static_cast<std::size_t>(n > 0 ? n : 0), L'\0');
+			if (n > 0) {
+				MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), label.data(), n);
 			}
-			std::string pad = "None", kb = "None";
-			for (const auto& k : KeysOf(g_layoutImc, g_slotActions[i])) {
-				std::string& slot = k.starts_with("Gamepad_") ? pad : kb;
-				if (slot == "None") {
-					slot = k;
-				}
-			}
-			// kept across restarts (the game cannot restore a runtime action's rebind)
-			if (settings::ReadIni("TweenLayoutPad", f.id, "?") != pad) {
-				settings::WriteIni("TweenLayoutPad", f.id, pad);
-			}
-			if (settings::ReadIni("TweenLayoutKeyboard", f.id, "?") != kb) {
-				settings::WriteIni("TweenLayoutKeyboard", f.id, kb);
-			}
-			int side = -1;
-			for (int d = 0; d < 4 && side < 0; ++d) {
-				if (pad == kPadSide[d]) {
-					side = d;
-				}
-			}
-			for (int d = 0; d < 4 && side < 0; ++d) {
-				if (pad == "None" && kb == kKeySide[d]) {
-					side = d;   // no controller binding: the keyboard row decides
-				}
-			}
-			out.push_back({ f.id, f.label, f.action, side });
+			out.push_back({ f.id, std::move(label), f.action, f.side });
 		}
 		return out;
 	}

@@ -8,14 +8,15 @@
 
 namespace
 {
-	void OnTick(XINPUT_STATE* a_state)
+	// every frame (from the message pump - controller or not)
+	void OnFrame()
 	{
 		tool::Pump();
-		menu::OnPad(a_state);   // first: while the menu is open the pad is the menu's
 		input::Tick();
 		if (input::TakePressed()) {
 			menu::Toggle();
 		}
+		menu::Keys();
 		menu::Tick();
 		systempage::Tick();
 		static bool toolRegistered = false;
@@ -25,12 +26,21 @@ namespace
 		}
 	}
 
+	// every controller read: while the menu is open the pad is the menu's
+	void OnPad(XINPUT_STATE* a_state)
+	{
+		menu::OnPad(a_state);
+	}
+
 	void OnMessage(OBSE::MessagingInterface::Message* a_msg)
 	{
-		if (!a_msg || a_msg->type != OBSE::MessagingInterface::kPostLoad) {
+		if (!a_msg) {
 			return;
 		}
-		tick::Install(&OnTick);
+		if (a_msg->type != OBSE::MessagingInterface::kPostLoad) {
+			return;
+		}
+		tick::Install(&OnFrame, &OnPad);
 	}
 }
 

@@ -58,3 +58,10 @@ OBSE_PLUGIN_LOAD(const OBSE::LoadInterface* a_obse)
 	}
 	return true;
 }
+
+// For other mods (Improved Wheel Menu, 2026-09-30): true while the Tween Menu is up or has just closed - the pad
+// still drained, or the option picked in it still waiting to open. Looked up by name with GetProcAddress.
+extern "C" __declspec(dllexport) bool TweenMenu_IsOpen()
+{
+	return menu::Busy();
+}

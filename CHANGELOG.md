@@ -8,6 +8,18 @@ Written as changes happen, not reconstructed afterwards (rule 61). Each version 
 * **failed** - built but crashed or malfunctioned; the number was reclaimed
 * **scratch** - a hypothesis-test build that never held a real number
 
+## 1.0.1 - 2026-09-30 - untested
+
+### Added
+- `TweenMenu_IsOpen()` exported for other mods: true while the menu is up, and just after it closes - while the
+  controller is still drained and while the option picked in it is waiting to open. Improved Wheel Menu looks it up by
+  name and keeps its wheels (the ammo wheel included) shut then (the owner, 2026-09-30: "The ammo wheel shouldn't be
+  able to be called during the tween menu event for when you're done").
+
+### Fixed
+- The menu's widget is created through a fault-guarded call, and never with a controller that is being destroyed
+  (gate rule or-world-context-calls-are-guarded, after Minimap Menu's crash on quitting, 2026-09-30).
+
 ## 1.0.0 - 2026-09-29 - working
 
 ### Added

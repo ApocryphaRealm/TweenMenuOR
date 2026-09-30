@@ -83,14 +83,16 @@ namespace menu
 			static auto* lib = ue::Class(L"/Script/UMG.WidgetBlueprintLibrary");
 			auto* cls = ue::Class(a_classPath);
 			auto* pc = PlayerController();
-			if (!lib || !cls || !pc) {
+			if (!lib || !cls || !pc || ue::Dying(pc)) {
 				return nullptr;
 			}
 			ue::Call c(lib->GetDefaultObject(false), L"Create");
 			c.Set("WorldContextObject", pc);
 			c.Set("WidgetType", cls);
 			c.Set("OwningPlayer", pc);
-			c.Run();
+			if (!c.RunGuarded()) {
+				return nullptr;
+			}
 			return c.Get<UE::UObject*>("ReturnValue");
 		}
 
@@ -458,6 +460,12 @@ namespace menu
 	bool IsOpen()
 	{
 		return g_open;
+	}
+
+	// open, or just closed: the pad still drained, or a chosen option still waiting to open (TweenMenu_IsOpen)
+	bool Busy()
+	{
+		return g_open || g_drain || g_pendingAction != nullptr;
 	}
 
 	void OnPad(XINPUT_STATE* a_state)

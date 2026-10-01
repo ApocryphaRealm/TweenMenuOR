@@ -22,6 +22,9 @@ Written as changes happen, not reconstructed afterwards (rule 61). Each version 
 - The "is this widget still alive" check reads the widget's slot index under a fault guard, so a widget the game has
   already garbage-collected returns "gone" instead of crashing (Apocrypha Menu Framework crashed this way on a loadout
   swap, 2026-09-30).
+- The reflection self-check asks again when the game has not linked the property it checks yet (the first frames of a
+  launch) instead of giving up for the session (gate rule or-reflect-selfcheck-never-latches-not-found, as in Simple
+  Loadout System).
 
 ## 1.0.0 - 2026-09-29 - working
 

@@ -19,6 +19,9 @@ Written as changes happen, not reconstructed afterwards (rule 61). Each version 
 ### Fixed
 - The menu's widget is created through a fault-guarded call, and never with a controller that is being destroyed
   (gate rule or-world-context-calls-are-guarded, after Minimap Menu's crash on quitting, 2026-09-30).
+- The "is this widget still alive" check reads the widget's slot index under a fault guard, so a widget the game has
+  already garbage-collected returns "gone" instead of crashing (Apocrypha Menu Framework crashed this way on a loadout
+  swap, 2026-09-30).
 
 ## 1.0.0 - 2026-09-29 - working
 
